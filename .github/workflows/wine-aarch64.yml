@@ -1,0 +1,54 @@
+# .github/workflows/wine-aarch64.yml
+name: Wine-aarch64 (portable) CI
+
+on:
+  schedule:
+    - cron:  '0 0 1 * *'
+  workflow_dispatch:
+
+jobs:
+  build-aarch64:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download bootstraps artifact
+        id: download-artifact
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: bootstraps.yml
+          workflow_conclusion: success
+          path: /opt
+
+      - name: Build Wine (x86_64 WoW64) & package for aarch64
+        run: |
+          set -euo pipefail
+          sudo apt update
+          sudo apt install -y debootstrap perl git wget xz-utils bubblewrap autoconf \
+                               cmake ninja-build pkg-config \
+                               gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+                               file python3
+          sudo tar -C /opt -xpf /opt/Bootstraps/bootstraps.tar.xz
+
+          chmod +x build_wine.sh
+          # Build latest/staging by default; can be overridden by workflow_dispatch inputs later.
+          export WINE_VERSION="latest"
+          export EXPERIMENTAL_WOW64="true"
+          export WINE_BRANCH="staging"
+          ./build_wine.sh
+
+          # Build produced one or more tarballs; pick amd64-wow64
+          ls -la ./*.tar.xz
+          wow64_tar="$(ls -1 *.tar.xz | grep -E 'amd64-wow64.*\.tar\.xz$' | head -n1)"
+          [ -n "$wow64_tar" ]
+
+          chmod +x package_aarch64_portable.sh
+          ./package_aarch64_portable.sh "$wow64_tar"
+
+          sha256sum wine-*-aarch64-portable.tar.xz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Wine-aarch64-portable
+          path: ./*-aarch64-portable.tar.xz
